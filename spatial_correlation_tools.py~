@@ -1,0 +1,78 @@
+# Authors: StOAefanos Papanikolaou <stefanos.papanikolaou@mail.wvu.edu>
+# BSD 2-Clause License
+# Copyright (c) 2019, PapStatMechMat
+# All rights reserved.
+# How to cite SeaPy:
+# S. Papanikolaou, Data-Rich, Equation-Free Predictions of Plasticity and Damage in Solids, (under review in Phys. Rev. Materials) arXiv:1905.11289 (2019)
+# the equation for covariance says that E[(X-E[X])(Y-E[Y])] == E[XY]-E[X]E[Y].
+
+from scipy.signal import correlate2d
+from numpy import reshape,average,var,shape,pad,log2,fft,empty
+import pylab as plt
+import numba,numpy
+
+@numba.jit(nogil=True)
+def dot_numba(a, b, start, stop, delay):
+    """Return dot product of two sequences in range."""
+    sum = 0.0
+    for n in range(start, stop):
+        sum += a[n + delay] * b[n]
+    return sum
+
+@numba.jit
+def correlate_numba(a, b):
+    size = len(a)
+    c = empty(size, 'float64')  # allocate output numpy array
+    for index in range(size):
+        delay = index - size // 2
+        if delay < 0:
+            c[index] = dot_numba(a, b, -delay, size, delay)
+        else:
+            c[index] = dot_numba(a, b, 0, size-delay, delay)
+    return c
+
+def pad_imsq(a):
+    sx,sy=shape(a)
+    sx_new=2**(int(log2(sx))+1)
+    sy_new=2**(int(log2(sy))+1)
+    return pad(a,(sx_new-sx,sy_new-sy),mode='constant')
+
+def correlate_fft2D(a,b):
+    a2=pad_imsq(a)
+    b2=pad_imsq(b)
+    a = fft.rfft2(a2)
+    b = fft.rfft2(b2)
+    a *= b.conj()
+    c = fft.irfft2(a)
+    c = fft.fftshift(c)
+    return c
+
+def Correlations2D(D0s,s):
+    corrs=[]
+    for d0 in D0s:
+        a=d0.reshape(s)
+        mean=d0.mean()
+        vard=var(d0)
+        xp=a-mean
+        corr=correlate_fft2D(xp,xp)
+        corrs.append(corr)
+        print(d0)
+    return corrs
+
+
+    
+
+def Plot2DCorrelations(D0s,corrs,labs,outpdir,s):
+    for d0,corr,lab in zip(D0s,corrs,labs):
+        fig, (ax_orig, ax_corr) = plt.subplots(2, 1,figsize=(6,15))
+        im1=ax_orig.imshow(d0.reshape(s), cmap='gray')
+        ax_orig.set_title('Original')
+        s2=shape(corr)
+        im2=ax_corr.imshow(corr[:int(3*s2[0]/4.),:int(3*s2[1]/4.)], cmap='copper')
+        plt.colorbar(im2,ax=ax_corr)
+        ax_corr.set_title('Auto-correlation')
+        fig.tight_layout()
+        fig.savefig(outpdir+'/AutoCorrelations_'+str(lab)+'.png')
+        plt.close(fig)
+    return None
+
